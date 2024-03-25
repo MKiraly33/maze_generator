@@ -1,5 +1,7 @@
 import pygame
 import random
+import math
+from queue import PriorityQueue
 
 
 class Node:
@@ -19,7 +21,19 @@ class Node:
         self.index_x = index_x
         self.index_y = index_y
         self.is_current = False
+        # A star props
         self.is_in_path = False
+        self.parent = None
+        self.g_score = 9999999999
+        self.f_score = 9999999999
+
+    def __eq__(self, other):
+        if isinstance(other, Node) and self.index_x == other.index_x and self.index_y == other.index_y:
+            return True
+        return False
+
+    def __lt__(self, other):
+        return self.f_score < other.f_score
 
     def draw(self, _screen=None, is_debug=False):
         # Upper left to upper right
@@ -40,8 +54,9 @@ class Node:
             pygame.draw.rect(_screen, "green", pygame.Rect(self.pos[0], self.pos[1],
                                                            self.side_length, self.side_length))
         if self.is_in_path:
-            pygame.draw.rect(_screen, "blue", pygame.Rect(self.pos[0] + 2, self.pos[1] - 2,
-                                                          self.side_length, self.side_length))
+            pygame.draw.rect(_screen, "blue", pygame.Rect(self.pos[0] + self.side_length / 4, self.pos[1] +
+                                                          self.side_length / 4,
+                                                          self.side_length / 2, self.side_length / 2))
 
 
 class Graph:
@@ -56,6 +71,7 @@ class Graph:
             for _y in range(graph_size):
                 self.graph[_x].append(Node(_x, _y, (current_x, current_y), side_length, line_color))
                 current_y += side_length
+        self.is_generating = False
 
     def get_unvisited_neighbours(self, _x, _y):
         to_return = []
@@ -72,6 +88,7 @@ class Graph:
         return to_return
 
     def generate_maze(self):
+        self.is_generating = True
         self.graph[0][0].is_visited = True
         stack = [self.graph[0][0]]
         while len(stack) > 0:
@@ -99,6 +116,60 @@ class Graph:
                 stack.append(chosen_cell)
             yield
             current_cell.is_current = False
+        self.is_generating = False
+
+    def a_star_get_neighbours(self, node):
+        neighbours = []
+        if not node.render_top:
+            neighbours.append(self.graph[node.index_x][node.index_y - 1])
+        if not node.render_bottom:
+            neighbours.append(self.graph[node.index_x][node.index_y + 1])
+        if not node.render_left:
+            neighbours.append(self.graph[node.index_x - 1][node.index_y])
+        if not node.render_right:
+            neighbours.append(self.graph[node.index_x + 1][node.index_y])
+        return neighbours
+
+    def get_path(self, last_node_in_path):
+        last_node_in_path.is_in_path = True
+        current = last_node_in_path.parent
+        while current is not None:
+            current.is_in_path = True
+            current = current.parent
+
+    def a_star(self):
+        open_set = PriorityQueue()
+        start = self.graph[0][0]
+        start.g_score = 0
+        start.f_score = math.sqrt(((self.graph[graph_size - 1][graph_size - 1].index_x - start.index_x) ** 2) +
+                                  ((self.graph[graph_size - 1][graph_size - 1].index_y - start.index_y) ** 2))
+        open_set.put((start.f_score, start))
+
+        while not open_set.empty():
+            current = open_set.get_nowait()[1]
+            print(current)
+            if current == self.graph[graph_size - 1][graph_size - 1]:
+                self.get_path(current)
+            for n in self.a_star_get_neighbours(current):
+                # Instead of +1 we can use a function, this way "speed" can be implemented
+                tentative_g_score = current.g_score + 1
+                if tentative_g_score < n.g_score:
+                    # This path to the neighbour is better
+                    n.parent = current
+                    n.g_score = tentative_g_score
+                    n.f_score = tentative_g_score + \
+                                math.sqrt(((self.graph[graph_size - 1][graph_size - 1].index_x - n.index_x) ** 2) +
+                                          ((self.graph[graph_size - 1][graph_size - 1].index_y - n.index_y) ** 2))
+                    if n not in open_set.queue:
+                        open_set.put((n.f_score, n))
+
+    def reset(self):
+        for x in range(graph_size):
+            for y in range(graph_size):
+                self.graph[x][y].g_score = 9999999999
+                self.graph[x][y].f_score = 9999999999
+                self.graph[x][y].parent = None
+                self.graph[x][y].is_in_path = False
 
 
 # pygame setup
@@ -123,7 +194,7 @@ while running:
 
     screen.fill("black")  # fill the screen with a color to wipe away anything from last frame
 
-    if generator and update_timer > 50:
+    if generator and update_timer > 1:
         try:
             next(generator)
         except StopIteration:
@@ -135,7 +206,10 @@ while running:
         graph = Graph(5.0, 5.0, 50, random.choice(["white", "red", "green", "blue", "cyan", "yellow"]))
         generator = graph.generate_maze()
         update_timer = 501
-
+    if keys[pygame.K_a]:
+        if not graph.is_generating:
+            graph.reset()
+            graph.a_star()
     # RENDER YOUR GAME HERE
     for x in range(graph_size):
         for y in range(graph_size):
